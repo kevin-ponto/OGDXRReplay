@@ -101,13 +101,13 @@ public class OGDReplay : MonoBehaviour
     };
 
     [Serializable]
-    public struct OGDFrame
+    public struct TrackedObjectFrame
     {
         public float time;
         public Vector3 pos;
         public Quaternion rot;
 
-        public OGDFrame(OGDFrame frame)
+        public TrackedObjectFrame(TrackedObjectFrame frame)
         {
             this.time = frame.time;
             this.pos = frame.pos;
@@ -117,13 +117,13 @@ public class OGDReplay : MonoBehaviour
 
     //make an optimized frame struct
     [BurstCompile]
-    public struct OPFrame
+    public struct OPTrackedObjectFrame
     {
         public float time;
         public Vector3 pos;
         public Quaternion rot;
 
-        public OPFrame(OGDFrame frame)
+        public OPTrackedObjectFrame(TrackedObjectFrame frame)
         {
             this.time = frame.time;
             this.pos = frame.pos;
@@ -151,25 +151,48 @@ public class OGDReplay : MonoBehaviour
     //    }
     //}
 
+    [Serializable]
+    public class StateObject
+    {
+        public string name;
+        public bool state;
+        public List<StateChangeFrame> frames = new List<StateChangeFrame>();
+
+        public int frameIndex = 0;
+
+        public void Set(float time)
+        {
+
+            //            Debug.Log($"{time} > {nextFrame.time}");
+
+            while ((time > frames[frameIndex].time) && (frameIndex < frames.Count))
+            {
+                frameIndex++;
+                state = frames[frameIndex].state;
+            }
+
+        }
+    }
+
 
     [Serializable]
     public class TrackedObject
     {
         public string name;
         public GameObject gameObject = null;
-        public List<OGDFrame> frames = new List<OGDFrame>();
+        public List<TrackedObjectFrame> frames = new List<TrackedObjectFrame>();
 
         int frameBatchSize = 1024;
-        public List<NativeArray<OPFrame>> frameBatchArray = new List<NativeArray<OPFrame>>();
+        public List<NativeArray<OPTrackedObjectFrame>> frameBatchArray = new List<NativeArray<OPTrackedObjectFrame>>();
         //we will keep track of our previous frame
-        OPFrame currFrame;
-        OPFrame nextFrame;
+        OPTrackedObjectFrame currFrame;
+        OPTrackedObjectFrame nextFrame;
         int frameIndex = 0;
         int frameCount = 0;
         float frameDeltaTime = 1;
 
         [BurstCompile]
-        OPFrame getNextFrame(int index)
+        OPTrackedObjectFrame getNextFrame(int index)
         {
             index = Math.Min(frameCount - 1, index);
 
@@ -188,7 +211,7 @@ public class OGDReplay : MonoBehaviour
 
 //            Debug.Log($"{time} > {nextFrame.time}");
 
-            if (time > nextFrame.time)
+            while ((time > nextFrame.time) && (frameIndex < frameCount))
             {
                 frameIndex++;
                 currFrame = nextFrame; // frameArray[frameIndex];
@@ -226,10 +249,10 @@ public class OGDReplay : MonoBehaviour
             for (int index=0; index < frames.Count; index+= frameBatchSize)
             {
                 int batchSize = Math.Min(frames.Count - index, frameBatchSize);
-                NativeArray<OPFrame> frameArray = new NativeArray<OPFrame>(frameBatchSize, Allocator.Persistent);
+                NativeArray<OPTrackedObjectFrame> frameArray = new NativeArray<OPTrackedObjectFrame>(frameBatchSize, Allocator.Persistent);
                 for (int i = 0; i < batchSize; i++)
                 {
-                    frameArray[i] = new OPFrame(frames[index + i]);
+                    frameArray[i] = new OPTrackedObjectFrame(frames[index + i]);
                 }
                 frameBatchArray.Add(frameArray);
 
@@ -251,7 +274,7 @@ public class OGDReplay : MonoBehaviour
 
         public void Dispose()
         {
-            foreach (NativeArray<OPFrame> frameArray in frameBatchArray)
+            foreach (NativeArray<OPTrackedObjectFrame> frameArray in frameBatchArray)
                 frameArray.Dispose();
         }
     }
@@ -267,6 +290,7 @@ public class OGDReplay : MonoBehaviour
         public List<EventCount> eventCount = new List<EventCount>();
        
         public List<TrackedObject> trackedObjects = new List<TrackedObject>();
+        public List<StateObject> stateObjects = new List<StateObject>();
 
         public void Optimize()
         {
@@ -386,6 +410,10 @@ public class OGDReplay : MonoBehaviour
         {
             if (trackedObject.gameObject != null)
                 trackedObject.Set(playbackTime);
+        }
+        foreach (StateObject stateObject in session.stateObjects)
+        {
+            stateObject.Set(playbackTime);
         }
         if ((quitOnCompletion) && (playbackTime >= session.duration))
         {

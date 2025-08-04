@@ -64,7 +64,14 @@ public class ProgressReport
 }
 
 [Serializable]
-public struct OGDFrame
+public struct StateChangeFrame
+{
+    public float time;
+    public bool state;
+};
+
+[Serializable]
+public struct TrackedObjectFrame
 {
    public float time;
    public Vector3 pos;
@@ -112,6 +119,7 @@ public class EventData
     public string http_user_agent;
     public string server_time;
     public int random_seed;
+    public string hand;
 };
 
 
@@ -138,7 +146,14 @@ public class EventCount
 public class TrackedObject
 {
     public string name;
-    public List<OGDFrame> frames = new List<OGDFrame>();
+    public List<TrackedObjectFrame> frames = new List<TrackedObjectFrame>();
+}
+
+[Serializable]
+public class StateObject
+{
+    public string name;
+    public List<StateChangeFrame> frames = new List<StateChangeFrame>();
 }
 
 [Serializable]
@@ -157,6 +172,7 @@ public class Session
     //private List<DataPackage> gazeDataPackages = new List<DataPackage>();
 
     public List<TrackedObject> trackedObjects = new List<TrackedObject>();
+    public List<StateObject> stateObjects = new List<StateObject>();
 
 
     public Session(string name)
@@ -171,7 +187,32 @@ public class Session
         System.IO.File.WriteAllText(filename, json);
     }
 
-    public void AddData(DataPackage dataPackage, string trackedObjectName)
+    public void AddStateObjectData(StateChangeFrame stateChangeFrame, string stateObjectName)
+    {
+        //assume that packages come in order. Lets update the duration
+        this.duration = stateChangeFrame.time;
+
+        StateObject stateObject = null;
+        foreach (StateObject s in stateObjects)
+        {
+            if (s.name == stateObjectName)
+            {
+                stateObject = s;
+                break;
+            }
+        }
+
+        if (stateObject == null)
+        {
+            stateObject = new StateObject();
+            stateObject.name = stateObjectName;
+            stateObjects.Add(stateObject);
+        }
+
+        stateObject.frames.Add(stateChangeFrame);
+    }
+
+    public void AddTrackedData(DataPackage dataPackage, string trackedObjectName)
     {
         //assume that packages come in order. Lets update the duration
         this.duration = dataPackage.time;
@@ -208,7 +249,7 @@ public class Session
 
         for (int i = 0; i < numItems; i++)
         {
-            OGDFrame frame = new OGDFrame();
+            TrackedObjectFrame frame = new TrackedObjectFrame();
             frame.time = prevTime + deltaTime * i;
             for (int ii = 0; ii < 3; ii++)
                 frame.pos[ii] = dataPackage.data[i].pos[ii];
@@ -428,7 +469,7 @@ public class OGDParser : MonoBehaviour
 
             DataPackage dataPackage = jsonArraytoDataPackage(eventData.gaze_data_package);
             dataPackage.time = gs.seconds_from_launch;
-            session.AddData(dataPackage, "viewport");
+            session.AddTrackedData(dataPackage, "viewport");
         }
         else if (event_id == "\"left_hand_data\"")
         {
@@ -437,7 +478,7 @@ public class OGDParser : MonoBehaviour
 
             DataPackage dataPackage = jsonArraytoDataPackage(eventData.left_hand_data_package);
             dataPackage.time = gs.seconds_from_launch;
-            session.AddData(dataPackage, "left_hand");
+            session.AddTrackedData(dataPackage, "left_hand");
         }
         else if (event_id == "\"right_hand_data\"")
         {
@@ -447,20 +488,44 @@ public class OGDParser : MonoBehaviour
 
             DataPackage dataPackage = jsonArraytoDataPackage(eventData.right_hand_data_package);
             dataPackage.time = gs.seconds_from_launch;
-            session.AddData(dataPackage, "right_hand");
+            session.AddTrackedData(dataPackage, "right_hand");
         }
         else if (event_id == "\"grab_gesture\"")
         {
             string data = items[dataColumnTypes["event_data"]];
-
-//            Debug.Log(data);
+            EventData eventData = JsonUtility.FromJson<EventData>(data);
+            StateChangeFrame stateChangeFrame = new StateChangeFrame();
+            stateChangeFrame.time = gs.seconds_from_launch;
+            stateChangeFrame.state = true;
+            string eventName = eventData.hand + "_Grip";
+            session.AddStateObjectData(stateChangeFrame, eventName);
+                     //  Debug.Log(eventData.hand);
         }
         else if (event_id == "\"grab_release\"")
         {
             string data = items[dataColumnTypes["event_data"]];
+            EventData eventData = JsonUtility.FromJson<EventData>(data);
+            StateChangeFrame stateChangeFrame = new StateChangeFrame();
+            stateChangeFrame.time = gs.seconds_from_launch;
+            stateChangeFrame.state = false;
+            string eventName = eventData.hand + "_Grip";
+            session.AddStateObjectData(stateChangeFrame, eventName);
 
-            Debug.Log(data);
+
+            // Debug.Log(data);
         }
+        //else if (event_id.Contains("release"))
+        //{
+        //    Debug.Log("release with " + event_id);
+        //    //assume we are releasing an object. So undo grip
+        //    string data = items[dataColumnTypes["event_data"]];
+        //    EventData eventData = JsonUtility.FromJson<EventData>(data);
+        //    StateChangeFrame stateChangeFrame = new StateChangeFrame();
+        //    stateChangeFrame.time = gs.seconds_from_launch;
+        //    stateChangeFrame.state = false;
+        //    string eventName = eventData.hand + "_Grip";
+        //    session.AddStateObjectData(stateChangeFrame, eventName);
+        //}
 
         //should we close out this session
         sessionItems[session_id]--;
